@@ -1,0 +1,21 @@
+# Build-only container used to verify that the project compiles against real
+# Linux SocketCAN headers. Not a runtime image.
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        linux-libc-dev \
+        ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+RUN make clean || true
+RUN make all tests
+
+RUN ls -la build/ \
+ && ./build/uds_main --help \
+ && echo "=== Running ISO-TP/UDS loopback test ===" \
+ && ./build/isotp_loopback

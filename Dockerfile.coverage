@@ -1,0 +1,45 @@
+# Coverage measurement container: builds with gcov instrumentation, runs the
+# loopback test, then summarises line coverage for uds/*.cpp.
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential linux-libc-dev ca-certificates python3 \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+# Build with --coverage. Compile each source to its own object file so the
+# resulting .gcno/.gcda names match the source names (iso_tp.gcno etc).
+WORKDIR /src/uds
+RUN for src in iso_tp.cpp uds_client.cpp vw_mqb.cpp backup.cpp; do \
+       g++ -std=c++17 -O0 -g --coverage -Wall -Wextra -Wpedantic -I. -c "$src"; \
+    done
+
+WORKDIR /src
+RUN mkdir -p build \
+ && g++ -std=c++17 -O0 -g --coverage -Wall -Wextra -Wpedantic -Iuds \
+        -c tests/isotp_loopback.cpp -o uds/isotp_loopback.o \
+ && g++ --coverage \
+        uds/isotp_loopback.o uds/iso_tp.o uds/uds_client.o uds/vw_mqb.o uds/backup.o \
+        -o build/isotp_loopback -pthread
+
+# Run the tests to produce .gcda coverage data. We allow the test to fail so
+# we still get a coverage report even if some new test is broken.
+RUN timeout 60 ./build/isotp_loopback > build/test.log 2>&1 || echo "=== TEST EXITED NON-ZERO ===" \
+ && echo "---- last 120 lines of test.log ----" \
+ && tail -120 build/test.log
+
+# gcov reads .gcno (compile-time) + .gcda (run-time) sitting next to each other
+# in uds/, and emits .gcov files into the cwd. We cd into uds/ so the paths match.
+RUN cd /src/uds \
+ && for src in iso_tp.cpp uds_client.cpp vw_mqb.cpp backup.cpp; do \
+       echo "==== $src ===="; \
+       gcov -r "$src" 2>&1 | grep -E "File|Lines executed|Creating" || true; \
+    done \
+ && mkdir -p /src/build \
+ && cp *.gcov /src/build/ \
+ && echo \
+ && echo "========== Aggregated summary (uds/*.cpp) ==========" \
+ && python3 /src/tools/summarize_gcov.py

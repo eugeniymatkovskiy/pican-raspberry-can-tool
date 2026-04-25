@@ -1,0 +1,14 @@
+# Runtime test container: boots a virtual CAN interface (vcan0) inside a
+# privileged container, then runs the UDS binary against it and checks the
+# frames that hit the bus via candump.
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential linux-libc-dev ca-certificates \
+        iproute2 can-utils kmod procps \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+RUN make all
